@@ -905,43 +905,118 @@ function renderSounds() {
 
 /* ---------- 🎤 распознавание речи (Chrome, Safari, Edge) ---------- */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition || null;
-let recActive = null;
+let recState = null;
+
+/* слова, которые звучат одинаково: распознаватель не знает, какое из них ты имела в виду */
+const HOMOPHONES = {
+  know: ['no'], write: ['right', 'rite'], hour: ['our'], night: ['knight'], knight: ['night'],
+  would: ['wood'], aisle: ['isle', 'ill', 'i\'ll'], suite: ['sweet'], queue: ['q', 'cue'],
+  beach: ['beech'], two: ['to', 'too'], seat: [], see: ['sea'], meet: ['meat'], tea: ['t'],
+  plane: ['plain'], weight: ['wait'], buy: ['by', 'bye'], hi: ['high'], high: ['hi'],
+};
+
+function micJudge(target, alts) {
+  const clean = x => norm(x).replace(/'/g, '');
+  const t = clean(target);
+  const ok = [t, ...(HOMOPHONES[t] || []).map(clean)];
+  return alts.some(a => {
+    const n = clean(a);
+    if (ok.includes(n)) return true;
+    // фраза: все слова должны прозвучать (в длинных фразах прощаем одно пропущенное служебное слово)
+    if (t.includes(' ')) {
+      const heard = n.split(' ');
+      const missing = t.split(' ').filter(w => !heard.includes(w)).length;
+      return missing === 0 || (t.split(' ').length >= 5 && missing === 1);
+    }
+    // одно слово: строго — cold вместо could считается ошибкой
+    return n.split(' ').includes(t) || (t.length >= 8 && lev(n, t) <= 1);
+  });
+}
+
+function micMsg(st, cls, text) {
+  if (!st.res) return;
+  st.res.className = 'pw-res show ' + cls;
+  st.res.textContent = text;
+}
+
+function micReset(st) {
+  clearTimeout(st.timer);
+  st.btn.classList.remove('rec');
+  st.btn.textContent = '🎤';
+  if (recState === st) recState = null;
+}
+
 function practiceSay(btn) {
-  const target = btn.dataset.say;
-  const res = btn.closest('.pword')?.querySelector('.pw-res');
-  if (recActive) { try { recActive.abort(); } catch {} recActive = null; }
+  // повторное нажатие на ту же кнопку = «я закончила, проверяй»
+  if (recState && recState.btn === btn) {
+    micMsg(recState, '', '⏳ Проверяю…');
+    try { recState.rec.stop(); } catch {}
+    return;
+  }
+  if (recState) {
+    const old = recState;
+    micReset(old);
+    try { old.rec.abort(); } catch {}
+    if (old.res) old.res.className = 'pw-res';
+  }
   speechSynthesis?.cancel?.();
+
   let rec;
   try { rec = new SR(); } catch { return toast('Распознавание речи не поддерживается в этом браузере'); }
-  rec.lang = 'en-US'; rec.interimResults = false; rec.maxAlternatives = 5;
-  recActive = rec;
+  rec.lang = 'en-US';
+  rec.continuous = false;
+  rec.interimResults = true;   // промежуточный текст сохраняем, чтобы не потерять сказанное
+  rec.maxAlternatives = 5;
+
+  const st = { rec, btn, target: btn.dataset.say, res: btn.closest('.pword')?.querySelector('.pw-res'),
+    finals: [], interim: '', error: null, heardSound: false, listening: false, startedAt: Date.now() };
+  recState = st;
   btn.classList.add('rec');
-  if (res) { res.className = 'pw-res show'; res.textContent = '🎙️ Говори…'; }
-  let got = false;
+  btn.textContent = '⏹';
+  micMsg(st, '', '⏳ Включаю микрофон…');
+
+  rec.onstart = () => { st.listening = true; st.startedAt = Date.now(); micMsg(st, '', '🎙️ Говори! Потом нажми ⏹ или просто помолчи'); };
+  rec.onsoundstart = () => { st.heardSound = true; };
+  rec.onspeechstart = () => { st.heardSound = true; };
   rec.onresult = e => {
-    got = true;
-    const alts = [...e.results[0]].map(a => a.transcript);
-    const t = norm(target).replace(/'/g, '');
-    const ok = alts.some(a => { const n = norm(a).replace(/'/g, ''); return n === t || n.includes(t) || (t.length > 4 && lev(n, t) <= Math.max(1, Math.floor(t.length / 8))); });
-    sound(ok);
-    if (res) {
-      res.className = 'pw-res show ' + (ok ? 'ok' : 'bad');
-      res.textContent = ok ? `✅ Отлично! Услышала: «${alts[0]}»` : `🤔 Услышала: «${alts[0]}». Послушай ещё раз и повтори`;
+    st.interim = '';
+    for (let i = 0; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) st.finals = [...r].map(a => a.transcript);
+      else st.interim += r[0].transcript;
     }
+    const live = st.finals[0] || st.interim;
+    if (live) micMsg(st, '', `🎙️ Слышу: «${live.trim()}»…`);
   };
-  rec.onerror = e => {
-    if (!res) return;
-    res.className = 'pw-res show bad';
-    res.textContent = e.error === 'not-allowed' || e.error === 'service-not-allowed'
-      ? '🎤 Разреши доступ к микрофону в настройках браузера'
-      : e.error === 'no-speech' ? '🤫 Ничего не слышно — попробуй ещё раз' : '😕 Не получилось распознать, попробуй ещё раз';
-    got = true;
-  };
+  rec.onerror = e => { if (e.error !== 'aborted') st.error = e.error; };
   rec.onend = () => {
-    btn.classList.remove('rec'); recActive = null;
-    if (!got && res) { res.className = 'pw-res show bad'; res.textContent = '🤫 Ничего не слышно — попробуй ещё раз'; }
+    if (recState !== st) return;          // эту запись уже заменили новой
+    const alts = st.finals.length ? st.finals : st.interim.trim() ? [st.interim.trim()] : [];
+    micReset(st);
+    if (alts.length) {
+      const ok = micJudge(st.target, alts.slice(0, 1)); // только главный вариант распознавателя
+      sound(ok);
+      micMsg(st, ok ? 'ok' : 'bad', ok
+        ? `✅ Отлично! Услышала: «${alts[0].trim()}»`
+        : `🤔 Услышала: «${alts[0].trim()}». Послушай 🔊 и попробуй ещё раз`);
+      return;
+    }
+    if (st.error === 'not-allowed' || st.error === 'service-not-allowed')
+      return micMsg(st, 'bad', '🎤 Нет доступа к микрофону. Разреши его в настройках браузера для этого сайта');
+    if (st.error === 'network')
+      return micMsg(st, 'bad', '📶 Для распознавания нужен интернет — проверь подключение');
+    if (st.error === 'audio-capture')
+      return micMsg(st, 'bad', '🎤 Микрофон не найден или занят другим приложением');
+    // запись оборвалась почти сразу — обычно это окно с разрешением на микрофон
+    if (!st.listening || Date.now() - st.startedAt < 1500)
+      return micMsg(st, '', '👍 Микрофон готов. Нажми 🎤 ещё раз и сразу скажи слово');
+    micMsg(st, 'bad', st.heardSound
+      ? '🤔 Не разобрала слово — скажи чуть громче и чётче'
+      : '🤫 Ничего не слышно — говори сразу после нажатия 🎤, ближе к телефону');
   };
-  rec.start();
+  // страховка: больше 8 секунд не слушаем
+  st.timer = setTimeout(() => { try { rec.stop(); } catch {} }, 8000);
+  try { rec.start(); } catch { micReset(st); micMsg(st, 'bad', '😕 Не получилось включить микрофон, попробуй ещё раз'); }
 }
 
 function quizItemHtml(q, qi) {

@@ -90,7 +90,7 @@ function defaultProgress() {
   return {
     v: 1, xp: 0, streak: 0, best: 0, lastActive: null, goal: 30,
     today: { date: todayStr(), xp: 0 },
-    lessons: {}, cards: {}, grammar: {},
+    lessons: {}, cards: {}, grammar: {}, sounds: {},
     settings: { sound: true, cardDir: 'en' },
     created: Date.now(),
   };
@@ -156,7 +156,8 @@ function route() {
   switch (page) {
     case 'lesson': return startLesson(a, +b);
     case 'cards': return a ? startCards(a) : renderCards();
-    case 'grammar': return a ? renderGrammarTopic(a) : renderGrammar();
+    case 'grammar': return a ? renderTopic('grammar', a) : renderGrammar();
+    case 'sounds': return a ? renderTopic('sounds', a) : renderSounds();
     case 'phrases': return a ? renderPhraseUnit(a) : renderPhrases();
     case 'profile': return renderProfile();
     default: return renderLearn();
@@ -166,11 +167,12 @@ window.addEventListener('hashchange', route);
 
 /* ---------------- каркас страницы ---------------- */
 const NAV = [
-  ['', '🏠', 'Учиться'],
-  ['cards', '🃏', 'Карточки'],
-  ['grammar', '📐', 'Грамматика'],
-  ['phrases', '📖', 'Разговорник'],
-  ['profile', '👤', 'Профиль'],
+  ['', '🏠', 'Учиться', 'Учёба'],
+  ['cards', '🃏', 'Карточки', 'Карточки'],
+  ['grammar', '📐', 'Грамматика', 'Грамм.'],
+  ['sounds', '🗣️', 'Произношение', 'Звуки'],
+  ['phrases', '📖', 'Разговорник', 'Фразы'],
+  ['profile', '👤', 'Профиль', 'Профиль'],
 ];
 function shell(active, content) {
   const streak = currentStreak();
@@ -180,7 +182,7 @@ function shell(active, content) {
   <div class="layout">
     <nav class="sidebar">
       <a class="logo" href="#/"><span>🧳</span> TripTalk</a>
-      ${NAV.map(([p, i, t]) => `<a href="#/${p}" class="nav-item ${active === p ? 'active' : ''}"><span class="ni">${i}</span><span class="nt">${t}</span>${p === 'cards' && due ? `<span class="badge">${due}</span>` : ''}</a>`).join('')}
+      ${NAV.map(([p, i, t, sh]) => `<a href="#/${p}" class="nav-item ${active === p ? 'active' : ''}" title="${t}"><span class="ni">${i}</span><span class="nt"><span class="nt-full">${t}</span><span class="nt-short">${sh}</span></span>${p === 'cards' && due ? `<span class="badge">${due}</span>` : ''}</a>`).join('')}
     </nav>
     <div class="main">
       <header class="topbar">
@@ -810,21 +812,52 @@ function grammarBank(q) {
   return shuffle([...tokens, ...(q.x || [])]);
 }
 
-function renderGrammarTopic(id) {
-  const g = GRAMMAR.find(x => x.id === id);
-  if (!g) return go('grammar');
-  G = { g, answers: {}, built: {}, banks: {}, saved: false };
+/* английские примеры в <i>…</i> делаем кликабельными: нажала — услышала */
+function sayable(html) {
+  return html.replace(/<i>([\s\S]*?)<\/i>/g, (m, inner) => {
+    const t = inner.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!/[a-z]/i.test(t) || /[а-яё]/i.test(t)) return m;
+    return `<i class="sayable" data-act="say" data-say="${esc(t)}">${inner}</i>`;
+  });
+}
+
+const TOPICS = {
+  grammar: { list: () => GRAMMAR, store: 'grammar', nav: 'grammar', back: '← Все темы грамматики' },
+  sounds: { list: () => PRONUNCIATION, store: 'sounds', nav: 'sounds', back: '← Все темы произношения' },
+};
+
+function wordsHtml(words) {
+  return `<div class="pwords">${words.map(([en, ru, note]) => `
+    <div class="pword">
+      <button class="pw-main" data-act="say" data-say="${esc(en)}"><b>${esc(en)}</b><span>${esc(ru)}</span>${note ? `<small>${esc(note)}</small>` : ''}</button>
+      <div class="pw-btns">
+        <button class="mini" data-act="say" data-say="${esc(en)}" data-slow="1" aria-label="Медленно">🐢</button>
+        ${SR ? `<button class="mini mic" data-act="mic" data-say="${esc(en)}" aria-label="Скажи сам">🎤</button>` : ''}
+      </div>
+      <div class="pw-res"></div>
+    </div>`).join('')}</div>`;
+}
+
+function renderTopic(kind, id) {
+  const T = TOPICS[kind];
+  const list = T.list();
+  const g = list.find(x => x.id === id);
+  if (!g) return go(kind);
+  G = { g, kind, store: T.store, answers: {}, built: {}, banks: {}, saved: false };
   g.quiz.forEach((q, i) => { if (q.b) { G.banks[i] = grammarBank(q); G.built[i] = []; } });
-  const i = GRAMMAR.indexOf(g);
-  const prev = GRAMMAR[i - 1], next = GRAMMAR[i + 1];
-  const group = GRAMMAR_GROUPS.find(x => x.id === g.group);
-  shell('grammar', `
-    <a class="back" href="#/grammar">← Все темы</a>
+  const i = list.indexOf(g);
+  const prev = list[i - 1], next = list[i + 1];
+  const group = kind === 'grammar' ? GRAMMAR_GROUPS.find(x => x.id === g.group)?.title : 'Произношение';
+  shell(T.nav, `
+    <a class="back" href="#/${kind}">${T.back}</a>
     <article class="grammar">
-      <small class="gcrumb">${esc(group?.title || '')} · Тема ${i + 1} из ${GRAMMAR.length}</small>
+      <small class="gcrumb">${esc(group || '')} · Тема ${i + 1} из ${list.length}</small>
       <h1>${g.icon} ${esc(g.title)}</h1>
       <p class="page-sub">${esc(g.sub)}</p>
-      <div class="gtext">${g.body}</div>
+      <div class="gtext">${sayable(g.body)}</div>
+      ${g.words ? `
+      <h3>Потренируйся <small class="h-note">нажми — послушай${SR ? ', 🎤 — скажи сам' : ''}</small></h3>
+      ${wordsHtml(g.words)}` : ''}
       ${g.mistakes ? `
       <h3>Типичные ошибки</h3>
       <div class="mistakes">
@@ -835,18 +868,80 @@ function renderGrammarTopic(id) {
             <div class="m-why">${esc(why)}</div>
           </div>`).join('')}
       </div>` : ''}
+      ${g.examples ? `
       <h3>Примеры <small class="h-note">нажми, чтобы послушать</small></h3>
       <div class="examples">
         ${g.examples.map(([en, ru]) => `<div class="example" data-act="say" data-say="${esc(en)}"><span class="ex-en">🔊 ${esc(en)}</span><span class="ex-ru">${esc(ru)}</span></div>`).join('')}
-      </div>
+      </div>` : ''}
       <h3>Проверь себя</h3>
       <div id="quiz">${quizHtml()}</div>
       <div class="topic-nav">
-        ${prev ? `<a class="btn ghost" href="#/grammar/${prev.id}">← ${prev.icon}</a>` : '<span></span>'}
-        ${next ? `<a class="next-topic" href="#/grammar/${next.id}">Дальше: ${next.icon} ${esc(next.title)} →</a>` : '<a class="next-topic" href="#/grammar">🎉 Все темы пройдены — к списку</a>'}
+        ${prev ? `<a class="btn ghost" href="#/${kind}/${prev.id}">← ${prev.icon}</a>` : '<span></span>'}
+        ${next ? `<a class="next-topic" href="#/${kind}/${next.id}">Дальше: ${next.icon} ${esc(next.title)} →</a>` : `<a class="next-topic" href="#/${kind}">🎉 Все темы пройдены — к списку</a>`}
       </div>
     </article>
   `);
+}
+
+function renderSounds() {
+  const done = PRONUNCIATION.filter(t => P.sounds[t.id]).length;
+  shell('sounds', `
+    <h1 class="page-title">🗣️ Произношение и чтение</h1>
+    <p class="page-sub">Почему could — «куд», а не «коулд»? Как читать незнакомые слова и как говорить, чтобы тебя понимали. Каждое слово можно послушать${SR ? ' и сказать в микрофон для проверки' : ''}.</p>
+    <div class="gprogress"><div class="mini-bar"><div style="width:${Math.round((done / PRONUNCIATION.length) * 100)}%"></div></div><span>Пройдено ${done} из ${PRONUNCIATION.length}</span></div>
+    <div class="grid" style="margin-top:16px">
+      ${PRONUNCIATION.map((t, i) => {
+        const r = P.sounds[t.id];
+        return `
+        <a class="gcard" href="#/sounds/${t.id}">
+          <div class="gicon">${t.icon}</div>
+          <div class="gbody"><small>Тема ${i + 1}</small><b>${esc(t.title)}</b><span>${esc(t.sub)}</span></div>
+          ${r ? `<div class="gscore ${r.best === t.quiz.length ? 'full' : ''}">${r.best}/${t.quiz.length}</div>` : ''}
+        </a>`;
+      }).join('')}
+    </div>
+  `);
+}
+
+/* ---------- 🎤 распознавание речи (Chrome, Safari, Edge) ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+let recActive = null;
+function practiceSay(btn) {
+  const target = btn.dataset.say;
+  const res = btn.closest('.pword')?.querySelector('.pw-res');
+  if (recActive) { try { recActive.abort(); } catch {} recActive = null; }
+  speechSynthesis?.cancel?.();
+  let rec;
+  try { rec = new SR(); } catch { return toast('Распознавание речи не поддерживается в этом браузере'); }
+  rec.lang = 'en-US'; rec.interimResults = false; rec.maxAlternatives = 5;
+  recActive = rec;
+  btn.classList.add('rec');
+  if (res) { res.className = 'pw-res show'; res.textContent = '🎙️ Говори…'; }
+  let got = false;
+  rec.onresult = e => {
+    got = true;
+    const alts = [...e.results[0]].map(a => a.transcript);
+    const t = norm(target).replace(/'/g, '');
+    const ok = alts.some(a => { const n = norm(a).replace(/'/g, ''); return n === t || n.includes(t) || (t.length > 4 && lev(n, t) <= Math.max(1, Math.floor(t.length / 8))); });
+    sound(ok);
+    if (res) {
+      res.className = 'pw-res show ' + (ok ? 'ok' : 'bad');
+      res.textContent = ok ? `✅ Отлично! Услышала: «${alts[0]}»` : `🤔 Услышала: «${alts[0]}». Послушай ещё раз и повтори`;
+    }
+  };
+  rec.onerror = e => {
+    if (!res) return;
+    res.className = 'pw-res show bad';
+    res.textContent = e.error === 'not-allowed' || e.error === 'service-not-allowed'
+      ? '🎤 Разреши доступ к микрофону в настройках браузера'
+      : e.error === 'no-speech' ? '🤫 Ничего не слышно — попробуй ещё раз' : '😕 Не получилось распознать, попробуй ещё раз';
+    got = true;
+  };
+  rec.onend = () => {
+    btn.classList.remove('rec'); recActive = null;
+    if (!got && res) { res.className = 'pw-res show bad'; res.textContent = '🤫 Ничего не слышно — попробуй ещё раз'; }
+  };
+  rec.start();
 }
 
 function quizItemHtml(q, qi) {
@@ -868,7 +963,7 @@ function quizItemHtml(q, qi) {
   }
   return `
     <div class="q ${cls}" id="q${qi}">
-      <div class="q-text">${qi + 1}. ${esc(q.q)}</div>
+      <div class="q-text">${q.say ? `<button class="mini q-say" data-act="say" data-say="${esc(q.say)}" aria-label="Послушать">🔊</button>` : ''}${qi + 1}. ${esc(q.q)}</div>
       <div class="q-opts">
         ${q.o.map((o, oi) => `<button class="qopt ${answered && oi === q.a ? 'right' : ''} ${answered && oi === st.val && !st.ok ? 'wrong' : ''}" data-act="quiz" data-q="${qi}" data-o="${oi}" ${answered ? 'disabled' : ''}>${esc(o)}</button>`).join('')}
       </div>
@@ -902,8 +997,9 @@ function setQuizAnswer(qi, st) {
     if (!G.saved) {
       G.saved = true;
       const score = Object.values(G.answers).filter(a => a.ok).length;
-      const prev = P.grammar[G.g.id];
-      P.grammar[G.g.id] = { best: Math.max(prev?.best || 0, score), date: todayStr() };
+      const store = P[G.store || 'grammar'] = P[G.store || 'grammar'] || {};
+      const prev = store[G.g.id];
+      store[G.g.id] = { best: Math.max(prev?.best || 0, score), date: todayStr() };
       if (score) addXp(score * 2);
       save(true);
     }
@@ -1045,12 +1141,12 @@ function renderProfile() {
     </section>
     ${user.guest ? `<div class="guest-banner"><div><b>Сохрани свой прогресс</b><span>Создай аккаунт — всё, что ты уже прошла, перенесётся.</span></div><button class="btn primary" data-act="guest-register">Создать аккаунт</button></div>` : ''}
     <div class="stat-grid">
-      <div class="sbox"><b>🔥 ${currentStreak()}</b><span>дней подряд</span></div>
-      <div class="sbox"><b>🏅 ${P.best || 0}</b><span>лучшая серия</span></div>
+      <div class="sbox"><b>🔥 ${currentStreak()}</b><span>дней подряд · рекорд ${P.best || 0}</span></div>
       <div class="sbox"><b>⭐ ${P.xp}</b><span>всего XP</span></div>
       <div class="sbox"><b>📚 ${lessonsDone}/${totalLessons}</b><span>уроков</span></div>
       <div class="sbox"><b>🧠 ${knownWords()}</b><span>слов выучено</span></div>
       <div class="sbox"><b>📐 ${Object.keys(P.grammar).length}/${GRAMMAR.length}</b><span>тем грамматики</span></div>
+      <div class="sbox"><b>🗣️ ${Object.keys(P.sounds || {}).length}/${PRONUNCIATION.length}</b><span>тем произношения</span></div>
     </div>
 
     <h3 class="section-h">Достижения</h3>
@@ -1092,6 +1188,7 @@ const actions = {
     try { await Backend.resetPassword(email); toast('Письмо для сброса пароля отправлено 📬'); } catch (e) { renderAuth(e.userMessage); }
   },
   say: el => speak(el.dataset.say, { slow: !!el.dataset.slow }),
+  mic: el => practiceSay(el),
   hint: el => {
     const wasOpen = el.classList.contains('open');
     closeHints();

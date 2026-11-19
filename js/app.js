@@ -312,6 +312,7 @@ function renderLearn() {
           </div>
           <a class="unit-book" href="#/phrases/${u.id}" title="Разговорник">📖<span>Разговорник</span></a>
         </div>
+        ${u.grammar ? `<div class="unit-grammar"><span>📐 Грамматика к разделу:</span>${u.grammar.map(id => `<a href="#/grammar/${id}">${esc(grammarTitle(id))}</a>`).join('')}</div>` : ''}
         <div class="path">
           ${defs.map((d, i) => {
             const done = !!P.lessons[u.id + '-' + i];
@@ -346,7 +347,7 @@ function optionsFrom(correct, pool, key, n = 4) {
   return shuffle([correct[key], ...others]);
 }
 const exEnRu = (w, pool) => ({ type: 'choice', title: 'Выбери правильный перевод', prompt: w.en, say: w.en, options: optionsFrom(w, pool, 'ru'), answer: w.ru, en: w.en, ru: w.ru });
-const exRuEn = (w, pool) => ({ type: 'choice', title: 'Как сказать по-английски?', prompt: w.ru, options: optionsFrom(w, pool, 'en'), answer: w.en, en: w.en, ru: w.ru, enOptions: true });
+const exRuEn = (w, pool) => ({ type: 'choice', title: 'Как сказать по-английски?', prompt: w.ru, g: w.g, options: optionsFrom(w, pool, 'en'), answer: w.en, en: w.en, ru: w.ru, enOptions: true });
 const exListen = (w, pool) => ({ type: 'listen', title: 'Выбери то, что услышишь', say: w.en, options: optionsFrom(w, pool, 'en'), answer: w.en, en: w.en, ru: w.ru, enOptions: true });
 const exType = w => ({ type: 'type', title: 'Напиши по-английски', prompt: w.ru, answers: w.en.split(' / '), answer: w.en, en: w.en, ru: w.ru });
 const exMatch = ws => ({ type: 'match', title: 'Найди пары', pairs: ws.map(w => [w.en, w.ru]) });
@@ -365,8 +366,18 @@ function exBuild(p, pool) {
     if (extra.length > 10) break;
   }
   const nExtra = tokens.length <= 4 ? 3 : tokens.length <= 7 ? 3 : 2;
-  return { type: 'build', title: 'Переведи предложение', prompt: p.ru, answer: p.en, en: p.en, ru: p.ru, bank: shuffle([...tokens, ...extra.slice(0, nExtra)]) };
+  return { type: 'build', title: 'Переведи предложение', prompt: p.ru, g: p.g, answer: p.en, en: p.en, ru: p.ru, bank: shuffle([...tokens, ...extra.slice(0, nExtra)]) };
 }
+
+/* русское предложение с пунктирными подсказками: нажми на слово — увидишь перевод */
+function glossHtml(g) {
+  return g.map(([ru, en]) => en
+    ? `<span class="hint" data-act="hint" tabindex="0">${esc(ru)}<span class="hint-pop">${esc(en)}</span></span>`
+    : esc(ru)).join(' ');
+}
+const promptHtml = ex => (ex.g ? glossHtml(ex.g) : esc(ex.prompt));
+const grammarTitle = id => GRAMMAR.find(t => t.id === id)?.title || '';
+const seenPhrase = p => !!(P.seen && P.seen[p.en]);
 
 function buildExercises(unit, def) {
   const wordPool = unit.words.length >= 4 ? unit.words : ALL_WORDS;
@@ -385,10 +396,13 @@ function buildExercises(unit, def) {
     // разбавляем: дополнительные упражнения ставим после интро-блока
     list = list.concat(extra);
   } else if (def.kind === 'phrases') {
+    // сначала объясняем фразу (разбор по словам), потом просим её собрать
     const ps = unit.phrases;
-    ps.forEach((p, i) => list.push(i % 3 === 2 ? exRuEn(p, ps) : exBuild(p, ALL_PHRASES)));
-    list.push(...sample(ps, 2).map(p => exListen(p, ps)));
-    list = shuffle(list);
+    ps.forEach(p => {
+      if (!seenPhrase(p)) list.push({ type: 'pintro', p, en: p.en });
+      list.push(exBuild(p, ALL_PHRASES));
+    });
+    list.push(...shuffle([...sample(ps, 2).map(p => exRuEn(p, ps)), ...sample(ps, 2).map(p => exListen(p, ps))]));
   } else {
     const ws = unit.words, ps = unit.phrases;
     list = shuffle([
@@ -431,7 +445,7 @@ function drawExercise() {
     <main class="ex" id="ex">${exBody(ex)}</main>
     <footer class="lesson-foot" id="foot">${footer(ex)}</footer>
   </div>`;
-  if (ex.type === 'intro' || ex.type === 'listen' || (ex.type === 'choice' && ex.say)) setTimeout(() => speak(ex.say || ex.en), 250);
+  if (ex.type === 'intro' || ex.type === 'pintro' || ex.type === 'listen' || (ex.type === 'choice' && ex.say)) setTimeout(() => speak(ex.say || ex.en), 250);
   const ta = document.getElementById('typed');
   if (ta) { ta.focus(); ta.addEventListener('input', () => setCheckEnabled(ta.value.trim().length > 0)); }
 }
@@ -449,10 +463,27 @@ function exBody(ex) {
         <button class="slow-btn" data-act="say" data-say="${esc(w.en)}" data-slow="1">🐢 медленно</button>
       </div>`;
     }
+    case 'pintro': {
+      const p = ex.p;
+      return `
+      <h2 class="ex-title"><span class="new-badge">НОВАЯ ФРАЗА</span></h2>
+      <div class="intro-card phrase-card">
+        <div class="intro-en">${speakerBtn(p.en)}<span>${esc(p.en)}</span></div>
+        <div class="intro-ru">${esc(p.ru)}</div>
+        <button class="slow-btn" data-act="say" data-say="${esc(p.en)}" data-slow="1">🐢 медленно</button>
+        <div class="breakdown">
+          <div class="bd-title">Из чего состоит</div>
+          ${p.g.filter(c => c[1]).map(([ru, en]) => `<div class="bd-row" data-act="say" data-say="${esc(en.replace(/\s*\(.*\)$/, '').replace(/…/g, ''))}"><b>${esc(en)}</b><span>${esc(ru.replace(/[,.?!]+$/, ''))}</span></div>`).join('')}
+        </div>
+        ${p.note ? `<div class="note">💡 ${esc(p.note)}</div>` : ''}
+        ${p.gref ? `<div class="gref">📐 Подробнее в грамматике: «${esc(grammarTitle(p.gref))}»</div>` : ''}
+      </div>`;
+    }
     case 'choice':
       return `
       <h2 class="ex-title">${ex.title}</h2>
-      <div class="prompt">${ex.say ? speakerBtn(ex.say) : '<span class="bubble-icon">💬</span>'}<span class="prompt-text">${esc(ex.prompt)}</span></div>
+      ${ex.g ? '<p class="hint-help">Нажми на подчёркнутое слово, чтобы увидеть перевод</p>' : ''}
+      <div class="prompt">${ex.say ? speakerBtn(ex.say) : '<span class="bubble-icon">💬</span>'}<span class="prompt-text">${promptHtml(ex)}</span></div>
       <div class="options">${ex.options.map((o, i) => `<button class="opt" data-act="opt" data-v="${esc(o)}"><span class="kbd">${i + 1}</span><span>${esc(o)}</span></button>`).join('')}</div>`;
     case 'listen':
       return `
@@ -470,7 +501,8 @@ function exBody(ex) {
     case 'build':
       return `
       <h2 class="ex-title">${ex.title}</h2>
-      <div class="prompt"><span class="bubble-icon">💬</span><span class="prompt-text">${esc(ex.prompt)}</span></div>
+      <p class="hint-help">Нажми на подчёркнутое слово, чтобы увидеть перевод</p>
+      <div class="prompt"><span class="bubble-icon">💬</span><span class="prompt-text">${promptHtml(ex)}</span></div>
       <div id="build-area">${buildArea(ex)}</div>`;
     case 'match':
       return `
@@ -508,7 +540,7 @@ function footer(ex, fb) {
       </div>
       <button class="btn ${fb.ok ? 'primary' : 'danger'} big" data-act="next">Дальше</button>`;
   }
-  if (ex.type === 'intro') return `<div class="fb-spacer"></div><button class="btn primary big" data-act="next">Понятно</button>`;
+  if (ex.type === 'intro' || ex.type === 'pintro') return `<div class="fb-spacer"></div><button class="btn primary big" data-act="next">Понятно</button>`;
   if (ex.type === 'match') return `<div class="fb-spacer">Нажми на английское слово, затем на перевод</div><button class="btn primary big" disabled>Проверить</button>`;
   return `<button class="btn ghost" data-act="skip">Не знаю</button><button class="btn primary big" data-act="check" id="check-btn" disabled>Проверить</button>`;
 }
@@ -567,7 +599,7 @@ function finishExercise(ok, typo = false) {
 
 function nextExercise() {
   const ex = curEx();
-  if (ex.type === 'intro' && L.phase === 'answer') { L.done++; }
+  if ((ex.type === 'intro' || ex.type === 'pintro') && L.phase === 'answer') { L.done++; }
   L.idx++;
   if (L.idx >= L.queue.length) return finishLesson();
   drawExercise();
@@ -581,6 +613,10 @@ function finishLesson() {
   P.lessons[key] = { times: (prev?.times || 0) + 1, best: Math.max(prev?.best || 0, acc), date: todayStr() };
   const words = L.def.kind === 'words' ? L.def.words : L.def.kind === 'review' ? L.unit.words : [];
   touchCards(words);
+  if (L.def.kind !== 'words') {
+    P.seen = P.seen || {};
+    L.queue.forEach(e => { if (e.type === 'pintro' || e.type === 'build') P.seen[e.en] = 1; });
+  }
   addXp(xp);
   save(true);
   const sec = Math.round((Date.now() - L.start) / 1000);
@@ -740,89 +776,152 @@ function finishCards() {
    ГРАММАТИКА
    ========================================================= */
 function renderGrammar() {
+  const done = GRAMMAR.filter(g => P.grammar[g.id]).length;
+  let n = 0;
   shell('grammar', `
     <h1 class="page-title">📐 Грамматика</h1>
-    <p class="page-sub">Только то, что реально нужно, чтобы строить фразы в поездке. Каждая тема — 2 минуты чтения и мини-тест.</p>
-    <div class="grid">
-      ${GRAMMAR.map((g, i) => {
-        const r = P.grammar[g.id];
-        return `
-        <a class="gcard" href="#/grammar/${g.id}">
-          <div class="gicon">${g.icon}</div>
-          <div class="gbody">
-            <small>Тема ${i + 1}</small>
-            <b>${esc(g.title)}</b>
-            <span>${esc(g.sub)}</span>
-          </div>
-          ${r ? `<div class="gscore ${r.best === g.quiz.length ? 'full' : ''}">${r.best}/${g.quiz.length}</div>` : ''}
-        </a>`;
-      }).join('')}
-    </div>
+    <p class="page-sub">Короткий курс от нуля: кто такие he / she / it, когда ставить is и the, как строить предложения и вопросы и как не бояться времён. Иди по порядку — каждая тема опирается на предыдущую.</p>
+    <div class="gprogress"><div class="mini-bar"><div style="width:${Math.round((done / GRAMMAR.length) * 100)}%"></div></div><span>Пройдено ${done} из ${GRAMMAR.length}</span></div>
+    ${GRAMMAR_GROUPS.map(gr => `
+      <h3 class="ggroup">${esc(gr.title)}<small>${esc(gr.sub)}</small></h3>
+      <div class="grid">
+        ${GRAMMAR.filter(g => g.group === gr.id).map(g => {
+          n++;
+          const r = P.grammar[g.id];
+          return `
+          <a class="gcard" href="#/grammar/${g.id}">
+            <div class="gicon">${g.icon}</div>
+            <div class="gbody">
+              <small>Тема ${n}</small>
+              <b>${esc(g.title)}</b>
+              <span>${esc(g.sub)}</span>
+            </div>
+            ${r ? `<div class="gscore ${r.best === g.quiz.length ? 'full' : ''}">${r.best}/${g.quiz.length}</div>` : ''}
+          </a>`;
+        }).join('')}
+      </div>`).join('')}
   `);
+}
+
+function grammarBank(q) {
+  const ans = Array.isArray(q.a) ? q.a[0] : q.a;
+  const tokens = tokenize(ans);
+  if (tokens.length && !/^I('|$)/.test(tokens[0])) tokens[0] = tokens[0][0].toLowerCase() + tokens[0].slice(1);
+  return shuffle([...tokens, ...(q.x || [])]);
 }
 
 function renderGrammarTopic(id) {
   const g = GRAMMAR.find(x => x.id === id);
   if (!g) return go('grammar');
-  G = { g, answers: {}, saved: false };
+  G = { g, answers: {}, built: {}, banks: {}, saved: false };
+  g.quiz.forEach((q, i) => { if (q.b) { G.banks[i] = grammarBank(q); G.built[i] = []; } });
   const i = GRAMMAR.indexOf(g);
-  const next = GRAMMAR[i + 1];
+  const prev = GRAMMAR[i - 1], next = GRAMMAR[i + 1];
+  const group = GRAMMAR_GROUPS.find(x => x.id === g.group);
   shell('grammar', `
     <a class="back" href="#/grammar">← Все темы</a>
     <article class="grammar">
+      <small class="gcrumb">${esc(group?.title || '')} · Тема ${i + 1} из ${GRAMMAR.length}</small>
       <h1>${g.icon} ${esc(g.title)}</h1>
       <p class="page-sub">${esc(g.sub)}</p>
       <div class="gtext">${g.body}</div>
-      <h3>Примеры</h3>
+      ${g.mistakes ? `
+      <h3>Типичные ошибки</h3>
+      <div class="mistakes">
+        ${g.mistakes.map(([bad, good, why]) => `
+          <div class="mistake">
+            <div class="m-bad">❌ <s>${esc(bad)}</s></div>
+            <div class="m-good" data-act="say" data-say="${esc(good.split(' / ')[0])}">✅ ${esc(good)}</div>
+            <div class="m-why">${esc(why)}</div>
+          </div>`).join('')}
+      </div>` : ''}
+      <h3>Примеры <small class="h-note">нажми, чтобы послушать</small></h3>
       <div class="examples">
         ${g.examples.map(([en, ru]) => `<div class="example" data-act="say" data-say="${esc(en)}"><span class="ex-en">🔊 ${esc(en)}</span><span class="ex-ru">${esc(ru)}</span></div>`).join('')}
       </div>
       <h3>Проверь себя</h3>
       <div id="quiz">${quizHtml()}</div>
-      ${next ? `<a class="next-topic" href="#/grammar/${next.id}">Следующая тема: ${next.icon} ${esc(next.title)} →</a>` : ''}
+      <div class="topic-nav">
+        ${prev ? `<a class="btn ghost" href="#/grammar/${prev.id}">← ${prev.icon}</a>` : '<span></span>'}
+        ${next ? `<a class="next-topic" href="#/grammar/${next.id}">Дальше: ${next.icon} ${esc(next.title)} →</a>` : '<a class="next-topic" href="#/grammar">🎉 Все темы пройдены — к списку</a>'}
+      </div>
     </article>
   `);
+}
+
+function quizItemHtml(q, qi) {
+  const st = G.answers[qi];
+  const answered = st !== undefined;
+  const cls = answered ? (st.ok ? 'q-ok' : 'q-bad') : '';
+  if (q.b) {
+    const bank = G.banks[qi], built = G.built[qi];
+    const right = Array.isArray(q.a) ? q.a[0] : q.a;
+    return `
+    <div class="q ${cls}" id="q${qi}">
+      <div class="q-text">${qi + 1}. Собери по-английски: <span class="q-ru">«${esc(q.b)}»</span></div>
+      <div class="built small">${built.length ? built.map((bi, k) => `<button class="chip" data-act="qunbuild" data-q="${qi}" data-k="${k}" ${answered ? 'disabled' : ''}>${esc(bank[bi])}</button>`).join('') : '<span class="built-hint">Нажимай на слова ниже</span>'}</div>
+      ${answered ? '' : `
+      <div class="bank left">${bank.map((t, i) => `<button class="chip ${built.includes(i) ? 'used' : ''}" data-act="qbuild" data-q="${qi}" data-i="${i}" ${built.includes(i) ? 'disabled' : ''}>${esc(t)}</button>`).join('')}</div>
+      <button class="btn primary small q-check" data-act="qcheck" data-q="${qi}" ${built.length ? '' : 'disabled'}>Проверить</button>`}
+      ${answered ? `<div class="q-exp">${st.ok ? '✅' : `💡 Правильно: <b data-act="say" data-say="${esc(right)}">${esc(right)}</b><br>`} ${esc(q.e)}</div>` : ''}
+    </div>`;
+  }
+  return `
+    <div class="q ${cls}" id="q${qi}">
+      <div class="q-text">${qi + 1}. ${esc(q.q)}</div>
+      <div class="q-opts">
+        ${q.o.map((o, oi) => `<button class="qopt ${answered && oi === q.a ? 'right' : ''} ${answered && oi === st.val && !st.ok ? 'wrong' : ''}" data-act="quiz" data-q="${qi}" data-o="${oi}" ${answered ? 'disabled' : ''}>${esc(o)}</button>`).join('')}
+      </div>
+      ${answered ? `<div class="q-exp">${st.ok ? '✅' : '💡'} ${esc(q.e)}</div>` : ''}
+    </div>`;
 }
 
 function quizHtml() {
   const { g, answers } = G;
   const doneCount = Object.keys(answers).length;
-  const score = g.quiz.filter((q, i) => answers[i] === q.a).length;
-  return g.quiz.map((q, qi) => {
-    const ans = answers[qi];
-    const answered = ans !== undefined;
-    return `
-    <div class="q ${answered ? (ans === q.a ? 'q-ok' : 'q-bad') : ''}">
-      <div class="q-text">${qi + 1}. ${esc(q.q)}</div>
-      <div class="q-opts">
-        ${q.o.map((o, oi) => `<button class="qopt ${answered && oi === q.a ? 'right' : ''} ${answered && oi === ans && ans !== q.a ? 'wrong' : ''}" data-act="quiz" data-q="${qi}" data-o="${oi}" ${answered ? 'disabled' : ''}>${esc(o)}</button>`).join('')}
-      </div>
-      ${answered ? `<div class="q-exp">${ans === q.a ? '✅' : '💡'} ${esc(q.e)}</div>` : ''}
-    </div>`;
-  }).join('') + (doneCount === g.quiz.length ? `
+  const score = Object.values(answers).filter(a => a.ok).length;
+  return g.quiz.map(quizItemHtml).join('') + (doneCount === g.quiz.length ? `
     <div class="quiz-result">
-      <b>${score === g.quiz.length ? '🌟 Идеально!' : score >= 3 ? '👍 Хорошо!' : '📚 Перечитай тему и попробуй снова'}</b>
+      <b>${score === g.quiz.length ? '🌟 Идеально!' : score >= g.quiz.length * 0.6 ? '👍 Хорошо!' : '📚 Перечитай тему и попробуй снова'}</b>
       <span>Результат: ${score} из ${g.quiz.length} · +${score * 2} XP</span>
       <button class="btn ghost" data-act="quiz-retry">Пройти ещё раз</button>
     </div>` : '');
 }
 
-function answerQuiz(qi, oi) {
+function redrawQuizItem(qi) {
+  const el = document.getElementById('q' + qi);
+  if (el) el.outerHTML = quizItemHtml(G.g.quiz[qi], qi);
+}
+
+function setQuizAnswer(qi, st) {
   if (G.answers[qi] !== undefined) return;
-  G.answers[qi] = oi;
+  G.answers[qi] = st;
+  sound(st.ok);
+  if (Object.keys(G.answers).length === G.g.quiz.length) {
+    document.getElementById('quiz').innerHTML = quizHtml();
+    if (!G.saved) {
+      G.saved = true;
+      const score = Object.values(G.answers).filter(a => a.ok).length;
+      const prev = P.grammar[G.g.id];
+      P.grammar[G.g.id] = { best: Math.max(prev?.best || 0, score), date: todayStr() };
+      if (score) addXp(score * 2);
+      save(true);
+    }
+    document.querySelector('.quiz-result')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } else redrawQuizItem(qi);
+}
+
+function answerQuiz(qi, oi) {
+  setQuizAnswer(qi, { ok: oi === G.g.quiz[qi].a, val: oi });
+}
+
+function checkQuizBuild(qi) {
   const q = G.g.quiz[qi];
-  sound(oi === q.a);
-  const el = document.getElementById('quiz');
-  el.innerHTML = quizHtml();
-  if (Object.keys(G.answers).length === G.g.quiz.length && !G.saved) {
-    G.saved = true;
-    const score = G.g.quiz.filter((q, i) => G.answers[i] === q.a).length;
-    const prev = P.grammar[G.g.id];
-    P.grammar[G.g.id] = { best: Math.max(prev?.best || 0, score), date: todayStr() };
-    if (score) addXp(score * 2);
-    save(true);
-    el.querySelector('.quiz-result')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
+  const val = G.built[qi].map(i => G.banks[qi][i]).join(' ');
+  const answers = Array.isArray(q.a) ? q.a : [q.a];
+  const ok = answers.some(a => norm(a) === norm(val));
+  if (ok) speak(val);
+  setQuizAnswer(qi, { ok, val });
 }
 
 /* =========================================================
@@ -853,10 +952,20 @@ function renderPhraseUnit(id) {
     <h3 class="section-h">💬 Фразы</h3>
     <div class="phrase-list">
       ${u.phrases.map(p => `
-        <div class="phrase">
-          <div class="ph-text" data-act="say" data-say="${esc(p.en)}"><b>${esc(p.en)}</b><span>${esc(p.ru)}</span></div>
-          <button class="mini" data-act="say" data-say="${esc(p.en)}">🔊</button>
-          <button class="mini" data-act="say" data-say="${esc(p.en)}" data-slow="1">🐢</button>
+        <div class="phrase-wrap">
+          <div class="phrase">
+            <div class="ph-text" data-act="say" data-say="${esc(p.en)}"><b>${esc(p.en)}</b><span>${esc(p.ru)}</span></div>
+            <button class="mini" data-act="say" data-say="${esc(p.en)}">🔊</button>
+            <button class="mini" data-act="say" data-say="${esc(p.en)}" data-slow="1">🐢</button>
+          </div>
+          <details class="ph-details">
+            <summary>Разбор по словам</summary>
+            <div class="breakdown">
+              ${p.g.filter(c => c[1]).map(([ru, en]) => `<div class="bd-row"><b>${esc(en)}</b><span>${esc(ru.replace(/[,.?!]+$/, ''))}</span></div>`).join('')}
+            </div>
+            ${p.note ? `<div class="note">💡 ${esc(p.note)}</div>` : ''}
+            ${p.gref ? `<a class="gref" href="#/grammar/${p.gref}">📐 Тема: ${esc(grammarTitle(p.gref))} →</a>` : ''}
+          </details>
         </div>`).join('')}
     </div>
 
@@ -983,6 +1092,21 @@ const actions = {
     try { await Backend.resetPassword(email); toast('Письмо для сброса пароля отправлено 📬'); } catch (e) { renderAuth(e.userMessage); }
   },
   say: el => speak(el.dataset.say, { slow: !!el.dataset.slow }),
+  hint: el => {
+    const wasOpen = el.classList.contains('open');
+    closeHints();
+    if (wasOpen) return;
+    el.classList.add('open');
+    // не даём подсказке вылезти за край экрана
+    const pop = el.querySelector('.hint-pop');
+    pop.style.setProperty('--shift', '0px');
+    const r = pop.getBoundingClientRect();
+    const W = document.documentElement.clientWidth;
+    let shift = 0;
+    if (r.right > W - 8) shift = W - 8 - r.right;
+    if (r.left + shift < 8) shift = 8 - r.left;
+    pop.style.setProperty('--shift', shift + 'px');
+  },
   'open-lesson': el => go(`lesson/${el.dataset.u}/${el.dataset.i}`),
 
   // урок
@@ -1039,7 +1163,14 @@ const actions = {
 
   // грамматика
   quiz: el => answerQuiz(+el.dataset.q, +el.dataset.o),
-  'quiz-retry': () => { G.answers = {}; G.saved = false; document.getElementById('quiz').innerHTML = quizHtml(); },
+  qbuild: el => { const qi = +el.dataset.q; G.built[qi].push(+el.dataset.i); speak(G.banks[qi][+el.dataset.i]); redrawQuizItem(qi); },
+  qunbuild: el => { const qi = +el.dataset.q; G.built[qi].splice(+el.dataset.k, 1); redrawQuizItem(qi); },
+  qcheck: el => checkQuizBuild(+el.dataset.q),
+  'quiz-retry': () => {
+    G.answers = {}; G.saved = false;
+    G.g.quiz.forEach((q, i) => { if (q.b) { G.banks[i] = grammarBank(q); G.built[i] = []; } });
+    document.getElementById('quiz').innerHTML = quizHtml();
+  },
 
   // разговорник
   'play-dialog': el => playDialog(el.dataset.u),
@@ -1072,8 +1203,11 @@ const actions = {
   },
 };
 
+function closeHints() { document.querySelectorAll('.hint.open').forEach(h => h.classList.remove('open')); }
+
 app.addEventListener('click', e => {
   const el = e.target.closest('[data-act]');
+  if (!el || el.dataset.act !== 'hint') closeHints();
   if (!el || el.disabled) return;
   // клик по кнопке озвучки внутри карточки не должен её переворачивать
   if (el.dataset.act === 'flip' && e.target.closest('.speaker, .cf-ex')) return;

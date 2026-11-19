@@ -475,6 +475,74 @@ input, textarea { font: inherit; color: inherit; }
 }
 .toast.show { transform: translate(-50%, 0); opacity: 1; }
 
+/* ---------------- подсказки пунктиром ---------------- */
+.hint {
+  position: relative; cursor: pointer; border-bottom: 2px dashed var(--faint);
+  padding-bottom: 1px; outline: none; transition: border-color .15s, color .15s;
+}
+.hint:hover, .hint.open { border-bottom-color: var(--blue); color: var(--blue-d); }
+.hint-pop {
+  display: none; position: absolute; z-index: 30; top: calc(100% + 10px); left: 50%;
+  transform: translateX(calc(-50% + var(--shift, 0px)));
+  background: var(--card); color: var(--text); border: 2px solid var(--border); border-radius: 12px;
+  padding: 8px 12px; font-size: 15px; font-weight: 800; white-space: nowrap; max-width: 80vw;
+  box-shadow: 0 6px 18px rgba(0,0,0,.15);
+}
+.hint.open .hint-pop { display: block; animation: fadein .15s ease-out; }
+@keyframes fadein { from { opacity: 0; } }
+@media (hover: hover) { .hint:hover .hint-pop { display: block; } }
+.hint-help { margin: -12px 0 14px; color: var(--muted); font-weight: 700; font-size: 13px; }
+@media (prefers-color-scheme: dark) { .hint:hover, .hint.open { color: #6cd0ff; } }
+
+/* ---------------- разбор фразы ---------------- */
+.phrase-card { text-align: left; justify-items: stretch; }
+.phrase-card .intro-en, .phrase-card .intro-ru, .phrase-card .slow-btn { justify-self: center; text-align: center; }
+.phrase-card .intro-en { font-size: 24px; }
+.breakdown { display: grid; gap: 6px; }
+.bd-title { font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: .5px; color: var(--faint); }
+.bd-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding: 8px 12px; border-radius: 12px; background: var(--bg2); cursor: pointer; align-items: center; }
+.bd-row b { color: var(--blue-d); overflow-wrap: anywhere; }
+.bd-row span { color: var(--muted); font-weight: 700; overflow-wrap: anywhere; }
+@media (prefers-color-scheme: dark) { .bd-row b { color: #6cd0ff; } }
+.note { background: #fff8e1; border: 2px solid #ffe08a; color: #6b5300; border-radius: 12px; padding: 10px 12px; font-weight: 700; font-size: 14px; }
+.gref { display: block; color: var(--purple); font-weight: 800; font-size: 13px; }
+@media (prefers-color-scheme: dark) { .note { background: #3a3215; border-color: #6b5a1c; color: #ffe08a; } }
+
+.unit-grammar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; font-size: 13px; }
+.unit-grammar span { color: var(--muted); font-weight: 800; margin-right: 2px; }
+.unit-grammar a { padding: 4px 10px; border-radius: 10px; border: 2px solid var(--border); font-weight: 800; color: var(--purple); background: var(--card); }
+.unit-grammar a:hover { background: var(--bg2); }
+
+.phrase-wrap { border: 2px solid var(--border); border-radius: 14px; }
+.phrase-wrap .phrase { border: 0; }
+.ph-details { padding: 0 12px 10px; }
+.ph-details summary { cursor: pointer; color: var(--blue); font-weight: 800; font-size: 13px; padding: 2px 0 4px; }
+.ph-details[open] { display: grid; gap: 8px; }
+
+/* ---------------- грамматика: новое ---------------- */
+.gprogress { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.gprogress .mini-bar { flex: 1; margin: 0; height: 10px; --c: var(--purple); }
+.gprogress span { color: var(--muted); font-weight: 800; font-size: 13px; white-space: nowrap; }
+.ggroup { font-size: 20px; margin: 26px 0 12px; display: grid; }
+.ggroup small { font-size: 14px; color: var(--muted); font-weight: 700; }
+.gcrumb { color: var(--faint); font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+.gtext h4 { font-size: 18px; margin: 22px 0 8px; font-weight: 900; }
+.gtext small { color: var(--muted); font-weight: 600; }
+.h-note { font-size: 13px; color: var(--faint); font-weight: 700; margin-left: 6px; }
+.mistakes { display: grid; gap: 8px; }
+.mistake { border: 2px solid var(--border); border-radius: 14px; padding: 10px 14px; display: grid; gap: 2px; }
+.m-bad { color: var(--bad-text); font-weight: 800; }
+.m-bad s { text-decoration-thickness: 2px; text-decoration-color: color-mix(in srgb, var(--red) 55%, transparent); }
+.m-good { color: var(--ok-text); font-weight: 800; cursor: pointer; }
+.m-why { color: var(--muted); font-size: 14px; font-weight: 600; }
+.q-ru { color: var(--blue-d); }
+.built.small { min-height: 50px; margin: 6px 0 12px; background-image: none; }
+.bank.left { justify-content: flex-start; }
+.q .chip { font-size: 15px; padding: 7px 11px; }
+.q-check { margin-top: 12px; }
+.topic-nav { display: flex; gap: 10px; align-items: stretch; margin-top: 26px; }
+.topic-nav .next-topic { flex: 1; margin: 0; }
+
 /* =========================================================
    ТЕЛЕФОНЫ
    ========================================================= */

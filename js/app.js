@@ -2,6 +2,7 @@
 /* =========================================================
    TripTalk — английский для путешествий
    ========================================================= */
+const APP_VERSION = '6';
 const app = document.getElementById('app');
 let user = null;   // текущий пользователь
 let P = null;      // прогресс
@@ -151,6 +152,7 @@ const dueCards = () => {
 function route() {
   if (!user) return renderAuth();
   speechSynthesis?.cancel?.();
+  if (recState) { recState.silent = true; micFinish(recState); }
   const [page, a, b] = location.hash.replace(/^#\/?/, '').split('/');
   window.scrollTo(0, 0);
   switch (page) {
@@ -832,7 +834,7 @@ function wordsHtml(words) {
       <button class="pw-main" data-act="say" data-say="${esc(en)}"><b>${esc(en)}</b><span>${esc(ru)}</span>${note ? `<small>${esc(note)}</small>` : ''}</button>
       <div class="pw-btns">
         <button class="mini" data-act="say" data-say="${esc(en)}" data-slow="1" aria-label="Медленно">🐢</button>
-        ${SR ? `<button class="mini mic" data-act="mic" data-say="${esc(en)}" aria-label="Скажи сам">🎤</button>` : ''}
+        ${SR ? `<button class="mini mic" data-act="mic" data-say="${esc(en)}" aria-label="Записать">🎤</button><button class="mini mic-stop" data-act="mic-stop" aria-label="Стоп" disabled>⏹</button>` : ''}
       </div>
       <div class="pw-res"></div>
     </div>`).join('')}</div>`;
@@ -933,32 +935,67 @@ function micJudge(target, alts) {
   });
 }
 
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
 function micMsg(st, cls, text) {
   if (!st.res) return;
   st.res.className = 'pw-res show ' + cls;
   st.res.textContent = text;
 }
 
-function micReset(st) {
-  clearTimeout(st.timer);
-  st.btn.classList.remove('rec');
-  st.btn.textContent = '🎤';
+function micUi(card, recording) {
+  if (!card) return;
+  const start = card.querySelector('[data-act=mic]'), stop = card.querySelector('[data-act=mic-stop]');
+  card.classList.toggle('recording', recording);
+  if (start) start.disabled = recording;
+  if (stop) stop.disabled = !recording;
+}
+
+/* завершаем запись один раз: оцениваем результат и обязательно отпускаем микрофон */
+function micFinish(st) {
+  if (st.done) return;
+  st.done = true;
+  clearTimeout(st.timer); clearTimeout(st.stopTimer); clearInterval(st.tick);
+  try { st.rec.onend = st.rec.onresult = st.rec.onerror = null; st.rec.abort(); } catch {}
   if (recState === st) recState = null;
+  micUi(st.card, false);
+  if (st.silent) return;
+
+  const alts = st.finals.length ? st.finals : st.interim.trim() ? [st.interim.trim()] : [];
+  if (alts.length) {
+    const ok = micJudge(st.target, alts.slice(0, 1)); // только главный вариант распознавателя
+    sound(ok);
+    return micMsg(st, ok ? 'ok' : 'bad', ok
+      ? `✅ Отлично! Услышала: «${alts[0].trim()}»`
+      : `🤔 Услышала: «${alts[0].trim()}». Послушай 🔊 и попробуй ещё раз`);
+  }
+  if (st.error === 'not-allowed')
+    return micMsg(st, 'bad', isIOS
+      ? '🎤 Нет доступа к микрофону. Настройки → Safari → Микрофон → Разрешить'
+      : '🎤 Нет доступа к микрофону. Разреши его в настройках браузера для этого сайта');
+  if (st.error === 'service-not-allowed')
+    return micMsg(st, 'bad', isIOS
+      ? '🎤 Включи диктовку: Настройки → Основные → Клавиатура → Диктовка'
+      : '🎤 Распознавание речи недоступно в этом браузере');
+  if (st.error === 'network') return micMsg(st, 'bad', '📶 Для распознавания нужен интернет — проверь подключение');
+  if (st.error === 'audio-capture') return micMsg(st, 'bad', '🎤 Микрофон занят другим приложением');
+  if (!st.listening) return micMsg(st, '', '👍 Микрофон готов. Нажми 🎤 ещё раз и скажи слово');
+  micMsg(st, 'bad', st.heardSound
+    ? '🤔 Не разобрала слово — скажи чуть громче и чётче'
+    : '🤫 Ничего не слышно. Нажми 🎤, скажи слово, потом ⏹');
+}
+
+function micStop() {
+  const st = recState;
+  if (!st) return;
+  micMsg(st, '', '⏳ Проверяю…');
+  try { st.rec.stop(); } catch {}
+  // Safari иногда «зависает» и не завершает запись — тогда завершаем сами
+  st.stopTimer = setTimeout(() => micFinish(st), 1200);
 }
 
 function practiceSay(btn) {
-  // повторное нажатие на ту же кнопку = «я закончила, проверяй»
-  if (recState && recState.btn === btn) {
-    micMsg(recState, '', '⏳ Проверяю…');
-    try { recState.rec.stop(); } catch {}
-    return;
-  }
-  if (recState) {
-    const old = recState;
-    micReset(old);
-    try { old.rec.abort(); } catch {}
-    if (old.res) old.res.className = 'pw-res';
-  }
+  if (recState) { recState.silent = true; const old = recState; if (old.res) old.res.className = 'pw-res'; micFinish(old); }
   speechSynthesis?.cancel?.();
 
   let rec;
@@ -966,57 +1003,40 @@ function practiceSay(btn) {
   rec.lang = 'en-US';
   rec.continuous = false;
   rec.interimResults = true;   // промежуточный текст сохраняем, чтобы не потерять сказанное
-  rec.maxAlternatives = 5;
+  rec.maxAlternatives = 3;
 
-  const st = { rec, btn, target: btn.dataset.say, res: btn.closest('.pword')?.querySelector('.pw-res'),
+  const card = btn.closest('.pword');
+  const st = { rec, card, target: btn.dataset.say, res: card?.querySelector('.pw-res'),
     finals: [], interim: '', error: null, heardSound: false, listening: false, startedAt: Date.now() };
   recState = st;
-  btn.classList.add('rec');
-  btn.textContent = '⏹';
+  micUi(card, true);
   micMsg(st, '', '⏳ Включаю микрофон…');
 
-  rec.onstart = () => { st.listening = true; st.startedAt = Date.now(); micMsg(st, '', '🎙️ Говори! Потом нажми ⏹ или просто помолчи'); };
+  rec.onstart = () => {
+    st.listening = true; st.startedAt = Date.now();
+    const show = () => {
+      const sec = Math.floor((Date.now() - st.startedAt) / 1000);
+      const live = (st.finals[0] || st.interim).trim();
+      micMsg(st, 'live', live ? `● Запись 0:0${sec} · слышу: «${live}»` : `● Запись 0:0${sec} · говори, потом ⏹`);
+    };
+    show(); st.tick = setInterval(show, 500);
+  };
   rec.onsoundstart = () => { st.heardSound = true; };
   rec.onspeechstart = () => { st.heardSound = true; };
   rec.onresult = e => {
+    st.heardSound = true;
     st.interim = '';
     for (let i = 0; i < e.results.length; i++) {
       const r = e.results[i];
       if (r.isFinal) st.finals = [...r].map(a => a.transcript);
       else st.interim += r[0].transcript;
     }
-    const live = st.finals[0] || st.interim;
-    if (live) micMsg(st, '', `🎙️ Слышу: «${live.trim()}»…`);
   };
   rec.onerror = e => { if (e.error !== 'aborted') st.error = e.error; };
-  rec.onend = () => {
-    if (recState !== st) return;          // эту запись уже заменили новой
-    const alts = st.finals.length ? st.finals : st.interim.trim() ? [st.interim.trim()] : [];
-    micReset(st);
-    if (alts.length) {
-      const ok = micJudge(st.target, alts.slice(0, 1)); // только главный вариант распознавателя
-      sound(ok);
-      micMsg(st, ok ? 'ok' : 'bad', ok
-        ? `✅ Отлично! Услышала: «${alts[0].trim()}»`
-        : `🤔 Услышала: «${alts[0].trim()}». Послушай 🔊 и попробуй ещё раз`);
-      return;
-    }
-    if (st.error === 'not-allowed' || st.error === 'service-not-allowed')
-      return micMsg(st, 'bad', '🎤 Нет доступа к микрофону. Разреши его в настройках браузера для этого сайта');
-    if (st.error === 'network')
-      return micMsg(st, 'bad', '📶 Для распознавания нужен интернет — проверь подключение');
-    if (st.error === 'audio-capture')
-      return micMsg(st, 'bad', '🎤 Микрофон не найден или занят другим приложением');
-    // запись оборвалась почти сразу — обычно это окно с разрешением на микрофон
-    if (!st.listening || Date.now() - st.startedAt < 1500)
-      return micMsg(st, '', '👍 Микрофон готов. Нажми 🎤 ещё раз и сразу скажи слово');
-    micMsg(st, 'bad', st.heardSound
-      ? '🤔 Не разобрала слово — скажи чуть громче и чётче'
-      : '🤫 Ничего не слышно — говори сразу после нажатия 🎤, ближе к телефону');
-  };
+  rec.onend = () => micFinish(st);
   // страховка: больше 8 секунд не слушаем
-  st.timer = setTimeout(() => { try { rec.stop(); } catch {} }, 8000);
-  try { rec.start(); } catch { micReset(st); micMsg(st, 'bad', '😕 Не получилось включить микрофон, попробуй ещё раз'); }
+  st.timer = setTimeout(() => micStop(), 8000);
+  try { rec.start(); } catch { st.error = 'start'; micFinish(st); }
 }
 
 function quizItemHtml(q, qi) {
@@ -1248,6 +1268,7 @@ function renderProfile() {
       <button class="btn ghost" data-act="logout">${user.guest ? 'Выйти из гостевого режима' : 'Выйти из аккаунта'}</button>
       <button class="btn link-danger" data-act="reset">Сбросить прогресс</button>
     </div>
+    <p class="app-version">TripTalk · версия ${APP_VERSION}</p>
   `);
 }
 
@@ -1264,6 +1285,7 @@ const actions = {
   },
   say: el => speak(el.dataset.say, { slow: !!el.dataset.slow }),
   mic: el => practiceSay(el),
+  'mic-stop': () => micStop(),
   hint: el => {
     const wasOpen = el.classList.contains('open');
     closeHints();

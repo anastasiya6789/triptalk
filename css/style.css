@@ -556,7 +556,12 @@ input, textarea { font: inherit; color: inherit; }
 .pw-main small { color: var(--muted); font-weight: 700; font-size: 12px; }
 @media (prefers-color-scheme: dark) { .pw-main b { color: #6cd0ff; } }
 .pw-btns { display: flex; gap: 6px; }
-.mic.rec { background: var(--red); animation: pulse-mic 1s infinite; }
+.mic-stop:disabled { opacity: .35; }
+.pword.recording { border-color: var(--red); box-shadow: 0 3px 0 var(--red); }
+.pword.recording .mic { background: var(--red-l); animation: pulse-mic 1s infinite; opacity: 1; }
+.pword.recording .mic-stop { background: var(--red); color: #fff; }
+.pw-res.live { color: var(--red); }
+.app-version { text-align: center; color: var(--faint); font-size: 12px; font-weight: 700; margin-top: 24px; }
 @keyframes pulse-mic { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--red) 30%, transparent); } }
 .pw-res { display: none; grid-column: 1 / -1; font-size: 13px; font-weight: 700; color: var(--muted); padding: 2px 0; }
 .pw-res.show { display: block; }

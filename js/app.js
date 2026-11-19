@@ -492,7 +492,8 @@ function matchArea(ex) {
     const cls = m.done.has(i) ? 'done' : m[side] === i ? 'sel' : m.wrong && m.wrong[side] === i ? 'wrong' : '';
     return `<button class="mcell ${cls}" data-act="match" data-side="${side}" data-i="${i}" ${m.done.has(i) ? 'disabled' : ''}>${esc(txt)}</button>`;
   };
-  return `<div class="match"><div class="mcol">${m.enOrder.map(i => cell('en', i)).join('')}</div><div class="mcol">${m.ruOrder.map(i => cell('ru', i)).join('')}</div></div>`;
+  // одна сетка на 2 колонки: ячейки одного ряда всегда одной высоты
+  return `<div class="match">${m.enOrder.map((ei, r) => cell('en', ei) + cell('ru', m.ruOrder[r])).join('')}</div>`;
 }
 
 function footer(ex, fb) {

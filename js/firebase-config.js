@@ -18,4 +18,11 @@
      appId: "1:123456789:web:abcdef"
    };
    ========================================================= */
-window.FIREBASE_CONFIG = null;
+window.FIREBASE_CONFIG = {
+  apiKey: "AIzaSyB6KXjgWMTdzk9s3FKzrTawdmyFwQ6gh1E",
+  authDomain: "triptalk-5ebce.firebaseapp.com",
+  projectId: "triptalk-5ebce",
+  storageBucket: "triptalk-5ebce.firebasestorage.app",
+  messagingSenderId: "244740929020",
+  appId: "1:244740929020:web:7b93c3f9f4129601b66e79"
+};
